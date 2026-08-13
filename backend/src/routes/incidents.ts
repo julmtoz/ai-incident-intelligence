@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { db } from "../lib/db.js";
+import { analysisQueue } from "../lib/queue.js";
 
 const router = Router();
 
@@ -9,19 +10,25 @@ const createIncidentSchema = z.object({
   description: z.string().min(10).max(5000),
 });
 
-// POST /api/incidents — create an incident record.
-// AI analysis + job enqueue is added in M2/M3; for now this just persists.
+// POST /api/incidents — create an incident record and enqueue analysis.
 router.post("/", async (req, res) => {
   const parsed = createIncidentSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const incident = await db.incident.create({
-    data: parsed.data,
+  const incident = await db.incident.create({ data: parsed.data });
+
+  const analysisJob = await db.analysisJob.create({
+    data: { incidentId: incident.id, status: "QUEUED" },
   });
 
-  res.status(201).json(incident);
+  await analysisQueue.add("analyse", {
+    incidentId: incident.id,
+    jobId: analysisJob.id,
+  });
+
+  res.status(201).json({ ...incident, jobs: [analysisJob] });
 });
 
 // GET /api/incidents — paginated list, newest first.
