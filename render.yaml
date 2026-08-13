@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: ai-incident-intelligence
+    runtime: docker
+    plan: starter
+    region: virginia
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/ready
+    preDeployCommand: npm run prisma:migrate -w backend
+    autoDeployTrigger: checksPass
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: TRUST_PROXY
+        value: "true"
+      - key: STATIC_DIR
+        value: /app/frontend/dist
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-incident-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: ai-incident-redis
+          type: keyvalue
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+
+  - type: keyvalue
+    name: ai-incident-redis
+    plan: starter
+    region: virginia
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
+databases:
+  - name: ai-incident-db
+    plan: basic-256mb
+    region: virginia
+    databaseName: incident_platform
+    user: incident_platform
+    postgresMajorVersion: "16"
+    ipAllowList: []

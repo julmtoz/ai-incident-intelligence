@@ -12,3 +12,8 @@ export const analysisQueue = new Queue("analysis", {
   connection: { url: env.REDIS_URL },
   defaultJobOptions: analysisJobOptions,
 });
+
+export async function pingRedis() {
+  await analysisQueue.getJobCounts();
+  return "PONG";
+}

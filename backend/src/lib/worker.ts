@@ -10,6 +10,7 @@ import {
 } from "../services/github-context.js";
 import type { ExternalContextItem } from "../services/github-context.js";
 import { db } from "./db.js";
+import { analysisQueue } from "./queue.js";
 
 type AnalysisJobData = { incidentId: string; jobId: string };
 
@@ -110,4 +111,27 @@ export function startWorker() {
   });
 
   return worker;
+}
+
+export async function recoverIncompleteAnalysisJobs() {
+  const incompleteJobs = await db.analysisJob.findMany({
+    where: { status: { in: ["QUEUED", "PROCESSING"] } },
+    select: { id: true, incidentId: true, status: true },
+  });
+
+  for (const job of incompleteJobs) {
+    if (job.status === "PROCESSING") {
+      await db.analysisJob.update({
+        where: { id: job.id },
+        data: { status: "QUEUED", completedAt: null },
+      });
+    }
+    await analysisQueue.add(
+      "analyse",
+      { incidentId: job.incidentId, jobId: job.id },
+      { jobId: job.id }
+    );
+  }
+
+  return incompleteJobs.length;
 }

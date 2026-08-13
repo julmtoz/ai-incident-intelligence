@@ -27,5 +27,37 @@ services:
       timeout: 5s
       retries: 5
 
+  app:
+    profiles: ["production"]
+    build:
+      context: .
+      target: production
+    restart: unless-stopped
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://incident_platform:incident_platform@postgres:5432/incident_platform
+      REDIS_URL: redis://redis:6379
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-replace-me}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      STATIC_DIR: /app/frontend/dist
+      TRUST_PROXY: "false"
+    ports:
+      - "3002:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
 volumes:
   postgres_data:

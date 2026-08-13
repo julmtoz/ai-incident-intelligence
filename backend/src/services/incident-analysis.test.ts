@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ parse: vi.fn() }));
 
 vi.mock("openai", () => ({
-  default: vi.fn(() => ({ responses: { parse: mocks.parse } })),
+  default: class OpenAIMock {
+    responses = { parse: mocks.parse };
+  },
 }));
 vi.mock("../config.js", () => ({
   env: { OPENAI_API_KEY: "test-key" },

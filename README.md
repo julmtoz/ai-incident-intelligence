@@ -1,96 +1,162 @@
 # AI Incident Intelligence Platform
 
-A service that takes an IT incident report and runs it through an AI-driven
-analysis pipeline: severity/category classification, root-cause summary,
-suggested troubleshooting steps, and relevant external technical context —
-processed asynchronously via a background job queue.
+A production-packaged incident operations dashboard that turns a plain-language
+IT incident into structured severity and category classification, a probable
+root cause, actionable troubleshooting steps, and relevant public GitHub issue
+context. Analysis runs asynchronously through a durable Redis-backed queue so
+the API stays responsive while the AI workflow completes.
 
-**Status: in progress.** This README is updated as milestones land, and only
-describes what is actually implemented — not the full target scope.
+**Project status:** M1–M6 complete. The repository is deployment-ready; a public
+live demo URL has not been provisioned yet.
 
-## Milestones
+> Live demo: _add the Render `onrender.com` URL after the first deployment._
+>
+> Screenshots: _add desktop and mobile dashboard captures after deployment._
 
-- [x] **M1 — Scaffold:** repo structure, Docker Compose (Postgres + Redis),
-      Prisma schema, Express API skeleton with health/readiness checks,
-      incident create/list/get endpoints
-- [x] **M2 — Job pipeline:** BullMQ queue wired to Redis; submitting an
-      incident enqueues a job; job status persisted and queryable
-- [x] **M3 — AI integration:** OpenAI Responses API call inside the worker —
-      severity/category classification, root-cause summary, suggested steps
-- [x] **M4 — External context:** GitHub REST API lookup folded into analysis
-- [x] **M5 — Frontend:** responsive React dashboard with incident submission,
-      status polling, analysis results, and GitHub context
-- [ ] **M6 — Hardening:** retry logic, tests, Docker image, CI, deployment
+## Architecture
 
-## Stack
+```mermaid
+flowchart LR
+    Browser[React dashboard] -->|same-origin REST| App[Express API + static frontend]
+    App -->|persist incidents/results| Postgres[(PostgreSQL)]
+    App -->|enqueue durable job| Redis[(Redis / BullMQ)]
+    Worker[Embedded BullMQ worker] --> Redis
+    Worker -->|structured response| OpenAI[OpenAI Responses API]
+    Worker -->|bounded issue search| GitHub[GitHub REST API]
+    Worker -->|atomic result update| Postgres
+```
 
-- **Frontend:** React, TypeScript
-- **Backend:** Node.js, Express, TypeScript
-- **Database:** PostgreSQL + Prisma
-- **AI:** OpenAI Responses API
-- **Background jobs:** BullMQ + Redis
-- **External API:** GitHub REST API
-- **Validation:** Zod
-- **Testing:** Vitest + Supertest
-- **Containers:** Docker Compose
-- **Deployment:** Render (planned)
+The deployable artifact is one Node container containing the Express API,
+production React build, and embedded BullMQ worker. PostgreSQL and Redis remain
+managed dependencies. This intentionally small architecture is appropriate for
+a portfolio deployment and can later split the worker into a dedicated service
+without changing the queue contract.
 
-## Local setup (current M5 scope)
+## What it demonstrates
 
-Prerequisites: Node.js 20+, npm, Docker Desktop.
+- React 19, TypeScript, Vite, responsive and accessible SaaS UI
+- Express 5 REST API with Zod validation and Prisma persistence
+- OpenAI Responses API structured output with a strict schema
+- BullMQ retries with exponential backoff and restart recovery
+- Bounded, non-fatal GitHub issue enrichment
+- PostgreSQL- and Redis-aware readiness checks
+- Multi-stage, non-root production Docker image
+- GitHub Actions CI and Render Blueprint infrastructure-as-code
+- Security headers, body limits, rate limiting, safe errors, and graceful shutdown
+
+## Analysis workflow
+
+1. `POST /api/incidents` validates and atomically persists the incident and job.
+2. BullMQ receives a deterministic job ID, with three attempts and exponential
+   backoff. Incomplete database jobs are reconciled back into Redis on startup.
+3. The worker performs one bounded GitHub issue search. Lookup failure is
+   non-fatal and analysis continues using the incident report alone.
+4. `gpt-5-mini` returns schema-validated severity, category, root cause, and
+   ordered troubleshooting steps.
+5. Prisma atomically records the completed analysis. The frontend polls every
+   2.5 seconds only while the job is `QUEUED` or `PROCESSING`.
+
+## Local development
+
+Prerequisites: Node.js 24+, npm, and Docker Desktop.
 
 ```bash
-npm install
+npm ci
 docker compose up -d
 cp backend/.env.example backend/.env
+# Add a spend-limited OPENAI_API_KEY to backend/.env.
 npm run prisma:generate -w backend
 npm run prisma:dev -w backend
 npm run dev
 ```
 
-API listens at `http://localhost:3001`.
-
-In a second terminal, start the frontend:
+In a second terminal:
 
 ```bash
 npm run dev:frontend
 ```
 
-The dashboard opens at `http://localhost:5173`. During development, Vite
-proxies `/api` and `/health` requests to the backend. To use a different API
-origin, copy `frontend/.env.example` to `frontend/.env` and set
-`VITE_API_BASE_URL`. The browser never calls OpenAI or GitHub directly.
+- Dashboard: `http://localhost:5173`
+- API: `http://localhost:3001`
+- Liveness: `GET /health/live`
+- Readiness: `GET /health/ready` (checks PostgreSQL and Redis)
 
-Health endpoints:
+Vite proxies `/api` and `/health` to the backend. The browser never receives or
+calls OpenAI/GitHub credentials. `VITE_API_BASE_URL` is available only when a
+separate API origin is intentionally required.
 
-- `GET /health/live`
-- `GET /health/ready` — includes a Postgres connectivity check
+## Verification commands
 
-Incident endpoints:
+```bash
+npm run lint
+npm test
+npm run build
+npm audit --audit-level=moderate
+npm exec -w backend prisma validate
+npm exec -w backend prisma migrate status
+docker compose config --quiet
+docker build --target production -t ai-incident-intelligence .
+```
 
-- `POST /api/incidents` — `{ title, description }`; persists the incident and
-  queues AI analysis
-- `GET /api/incidents` — paginated list
-- `GET /api/incidents/:id` — single incident with job history
+Run the complete local production stack (the app maps to port `3002` so it can
+coexist with a development API on `3001`):
 
-The background worker uses `gpt-5-mini` with a strict structured-output schema.
-It persists severity and category on the incident, plus root cause and a
-JSON-encoded array of suggested steps on the analysis job. Failed calls retry
-up to three total attempts with exponential backoff before becoming `FAILED`.
-Before analysis, the worker makes one bounded public GitHub issue search and
-stores up to three normalized results in `AnalysisJob.externalContext`.
-`GITHUB_TOKEN` is optional and used only by the backend; without it, the lookup
-uses GitHub's lower-limit unauthenticated public API. GitHub lookup failures are
-non-fatal and analysis continues using the incident report alone.
+```bash
+OPENAI_API_KEY=your-spend-limited-key docker compose --profile production up --build
+```
 
-## Frontend workflow
+Then open `http://localhost:3002`.
 
-The M5 dashboard submits incidents through the existing API, adds them to the
-local incident list immediately, and polls the selected incident every 2.5
-seconds while its latest job is `QUEUED` or `PROCESSING`. Polling stops at
-`COMPLETED` or `FAILED`. Completed jobs show classification, probable root
-cause, parsed troubleshooting steps, and any normalized GitHub issue context.
-Failed jobs show safe retry guidance without exposing stored provider errors.
+## Production configuration
 
-Production hardening, CI, container images, and deployment remain explicitly
-pending for M6.
+Copy `backend/.env.example` for local use only. Never commit `.env` files.
+
+Required server-side variables:
+
+- `DATABASE_URL` — PostgreSQL connection string
+- `REDIS_URL` — Redis-compatible connection string
+- `OPENAI_API_KEY` — secret, ideally project-scoped with a hard spend limit
+
+Optional/runtime variables:
+
+- `GITHUB_TOKEN` — raises GitHub search rate limits; remains server-side
+- `PORT` — defaults to `3001`; Render supplies `10000`
+- `FRONTEND_URL` — optional CORS origin for split-origin development/deployments
+- `BODY_LIMIT`, `RATE_LIMIT_*`, `STATIC_DIR`, `TRUST_PROXY`
+
+## Deploy to Render
+
+[`render.yaml`](./render.yaml) provisions one Docker web service, private Render
+Key Value instance, and Render PostgreSQL database in the same region. It wires
+private connection strings automatically, runs Prisma migrations before deploy,
+checks `/health/ready`, and waits up to 30 seconds for graceful shutdown.
+
+1. Push this repository to GitHub.
+2. In Render, choose **New → Blueprint** and select the repository.
+3. Review the paid starter/basic resource plans in the Blueprint.
+4. Enter `OPENAI_API_KEY` when prompted; optionally enter `GITHUB_TOKEN`.
+5. Apply the Blueprint and wait for the CI-gated Docker deploy.
+6. Verify `/health/live`, `/health/ready`, then submit one incident through the
+   generated `onrender.com` URL.
+7. Add that URL and screenshots to the placeholders at the top of this README.
+
+Render’s Blueprint and health-check behavior are documented in the
+[Blueprint specification](https://render.com/docs/blueprint-spec) and
+[health-check guide](https://render.com/docs/health-checks).
+
+## CI
+
+`.github/workflows/ci.yml` runs on pushes and pull requests and performs npm
+clean install, Prisma generation/validation, backend/frontend lint and tests,
+backend/frontend builds, Compose validation, and a production Docker build.
+
+## Milestones
+
+- [x] M1 — API, Prisma, PostgreSQL, Redis scaffold
+- [x] M2 — BullMQ job pipeline
+- [x] M3 — OpenAI structured incident analysis
+- [x] M4 — GitHub external context
+- [x] M5 — React submission, status, and results dashboard
+- [x] M6 — Production hardening, CI, Docker, deployment, portfolio packaging
+
+No additional milestone or product feature work is included in M6.

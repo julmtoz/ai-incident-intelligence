@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   incidentUpdate: vi.fn(),
   transactionAnalysisJobUpdate: vi.fn(),
   transaction: vi.fn(),
+  analysisJobFindMany: vi.fn(),
+  queueAdd: vi.fn(),
 }));
 
 vi.mock("../config.js", () => ({ env: { REDIS_URL: "redis://test" } }));
@@ -16,15 +18,18 @@ vi.mock("../services/incident-analysis.js", () => ({
 vi.mock("../services/github-context.js", () => ({
   githubContextProvider: { findRelevant: vi.fn().mockResolvedValue([]) },
 }));
+vi.mock("./queue.js", () => ({
+  analysisQueue: { add: mocks.queueAdd },
+}));
 vi.mock("./db.js", () => ({
   db: {
-    analysisJob: { update: mocks.analysisJobUpdate },
+    analysisJob: { update: mocks.analysisJobUpdate, findMany: mocks.analysisJobFindMany },
     incident: { findUniqueOrThrow: mocks.incidentFind },
     $transaction: mocks.transaction,
   },
 }));
 
-import { createAnalysisProcessor, recordAnalysisFailure } from "./worker.js";
+import { createAnalysisProcessor, recordAnalysisFailure, recoverIncompleteAnalysisJobs } from "./worker.js";
 
 function makeJob(attemptsMade = 0, attempts = 3) {
   return {
@@ -44,6 +49,8 @@ describe("analysis worker", () => {
     });
     mocks.incidentUpdate.mockResolvedValue({});
     mocks.transactionAnalysisJobUpdate.mockResolvedValue({});
+    mocks.analysisJobFindMany.mockResolvedValue([]);
+    mocks.queueAdd.mockResolvedValue({});
     mocks.transaction.mockImplementation(async (callback) =>
       callback({
         incident: { update: mocks.incidentUpdate },
@@ -168,6 +175,30 @@ describe("analysis worker", () => {
     expect(mocks.analysisJobUpdate).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ data: expect.objectContaining({ startedAt: undefined }) })
+    );
+  });
+
+  it("requeues incomplete jobs with deterministic BullMQ IDs after restart", async () => {
+    mocks.analysisJobFindMany.mockResolvedValue([
+      { id: "job-1", incidentId: "incident-1", status: "PROCESSING" },
+      { id: "job-2", incidentId: "incident-2", status: "QUEUED" },
+    ]);
+
+    await expect(recoverIncompleteAnalysisJobs()).resolves.toBe(2);
+
+    expect(mocks.analysisJobUpdate).toHaveBeenCalledWith({
+      where: { id: "job-1" },
+      data: { status: "QUEUED", completedAt: null },
+    });
+    expect(mocks.queueAdd).toHaveBeenCalledWith(
+      "analyse",
+      { incidentId: "incident-1", jobId: "job-1" },
+      { jobId: "job-1" }
+    );
+    expect(mocks.queueAdd).toHaveBeenCalledWith(
+      "analyse",
+      { incidentId: "incident-2", jobId: "job-2" },
+      { jobId: "job-2" }
     );
   });
 });

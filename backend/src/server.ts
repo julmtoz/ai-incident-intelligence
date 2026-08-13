@@ -1,10 +1,37 @@
 import "dotenv/config";
 import { app } from "./app.js";
 import { env } from "./config.js";
-import { startWorker } from "./lib/worker.js";
+import { analysisQueue } from "./lib/queue.js";
+import { db } from "./lib/db.js";
+import { recoverIncompleteAnalysisJobs, startWorker } from "./lib/worker.js";
 
-startWorker();
+const worker = startWorker();
+const recoveredJobs = await recoverIncompleteAnalysisJobs();
+if (recoveredJobs) console.log(`Recovered ${recoveredJobs} incomplete analysis job(s)`);
 
-app.listen(env.PORT, () => {
+const server = app.listen(env.PORT, () => {
   console.log(`API listening on http://localhost:${env.PORT}`);
 });
+
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received; shutting down gracefully`);
+  server.close();
+  const forceExit = setTimeout(() => process.exit(1), 25_000);
+  forceExit.unref();
+  try {
+    await worker.close();
+    await analysisQueue.close();
+    await db.$disconnect();
+    clearTimeout(forceExit);
+    process.exit(0);
+  } catch (error) {
+    console.error("Graceful shutdown failed", error instanceof Error ? error.message : "Unknown error");
+    process.exit(1);
+  }
+}
+
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.once("SIGINT", () => void shutdown("SIGINT"));
