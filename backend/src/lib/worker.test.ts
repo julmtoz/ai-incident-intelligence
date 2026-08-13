@@ -13,6 +13,9 @@ vi.mock("../config.js", () => ({ env: { REDIS_URL: "redis://test" } }));
 vi.mock("../services/incident-analysis.js", () => ({
   openAIIncidentAnalysisProvider: { analyze: vi.fn() },
 }));
+vi.mock("../services/github-context.js", () => ({
+  githubContextProvider: { findRelevant: vi.fn().mockResolvedValue([]) },
+}));
 vi.mock("./db.js", () => ({
   db: {
     analysisJob: { update: mocks.analysisJobUpdate },
@@ -59,11 +62,23 @@ describe("analysis worker", () => {
       }),
     };
 
-    await createAnalysisProcessor(provider)(makeJob());
+    const context = [
+      {
+        sourceType: "github_issue" as const,
+        title: "Similar checkout outage",
+        url: "https://github.com/example/checkout/issues/7",
+        excerpt: "Upstream health checks failed.",
+        repository: "example/checkout",
+      },
+    ];
+    const contextProvider = { findRelevant: vi.fn().mockResolvedValue(context) };
+
+    await createAnalysisProcessor(provider, contextProvider)(makeJob());
 
     expect(provider.analyze).toHaveBeenCalledWith({
       title: "Checkout outage",
       description: "All checkout requests return HTTP 503.",
+      externalContext: context,
     });
     expect(mocks.incidentUpdate).toHaveBeenCalledWith({
       where: { id: "incident-1" },
@@ -75,9 +90,38 @@ describe("analysis worker", () => {
         status: "COMPLETED",
         rootCause: "The checkout upstream is unavailable.",
         suggestedSteps: JSON.stringify(["Inspect upstream health", "Fail over traffic"]),
+        externalContext: context,
         completedAt: expect.any(Date),
       }),
     });
+  });
+
+  it("continues incident-only analysis when GitHub lookup fails", async () => {
+    const provider = {
+      analyze: vi.fn().mockResolvedValue({
+        severity: "HIGH" as const,
+        category: "Availability",
+        rootCause: "The upstream is unavailable.",
+        suggestedSteps: ["Inspect upstream health"],
+      }),
+    };
+    const contextProvider = {
+      findRelevant: vi.fn().mockRejectedValue(new Error("GitHub rate limited")),
+    };
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await createAnalysisProcessor(provider, contextProvider)(makeJob());
+
+    expect(provider.analyze).toHaveBeenCalledWith(
+      expect.objectContaining({ externalContext: [] })
+    );
+    expect(mocks.transactionAnalysisJobUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ externalContext: [] }) })
+    );
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringContaining("GitHub context unavailable; continuing without it")
+    );
+    warning.mockRestore();
   });
 
   it("propagates provider failures so BullMQ can retry", async () => {

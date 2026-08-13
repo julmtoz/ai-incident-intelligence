@@ -4,6 +4,11 @@ import {
   IncidentAnalysisProvider,
   openAIIncidentAnalysisProvider,
 } from "../services/incident-analysis.js";
+import {
+  GitHubContextProvider,
+  githubContextProvider,
+} from "../services/github-context.js";
+import type { ExternalContextItem } from "../services/github-context.js";
 import { db } from "./db.js";
 
 type AnalysisJobData = { incidentId: string; jobId: string };
@@ -14,7 +19,8 @@ function safeErrorMessage(error: unknown) {
 }
 
 export function createAnalysisProcessor(
-  provider: IncidentAnalysisProvider = openAIIncidentAnalysisProvider
+  provider: IncidentAnalysisProvider = openAIIncidentAnalysisProvider,
+  contextProvider: GitHubContextProvider = githubContextProvider
 ) {
   return async (job: Job<AnalysisJobData>) => {
     const { incidentId, jobId } = job.data;
@@ -34,7 +40,14 @@ export function createAnalysisProcessor(
       where: { id: incidentId },
       select: { title: true, description: true },
     });
-    const analysis = await provider.analyze(incident);
+    let externalContext: ExternalContextItem[] = [];
+    try {
+      externalContext = await contextProvider.findRelevant(incident);
+    } catch (error) {
+      const diagnostic = error instanceof Error ? error.message : "Unknown GitHub lookup error";
+      console.warn(`GitHub context unavailable; continuing without it: ${diagnostic.slice(0, 500)}`);
+    }
+    const analysis = await provider.analyze({ ...incident, externalContext });
 
     await db.$transaction(async (transaction) => {
       await transaction.incident.update({
@@ -47,6 +60,7 @@ export function createAnalysisProcessor(
           status: "COMPLETED",
           rootCause: analysis.rootCause,
           suggestedSteps: JSON.stringify(analysis.suggestedSteps),
+          externalContext,
           error: null,
           completedAt: new Date(),
         },

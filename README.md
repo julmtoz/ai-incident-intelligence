@@ -17,7 +17,7 @@ describes what is actually implemented — not the full target scope.
       incident enqueues a job; job status persisted and queryable
 - [x] **M3 — AI integration:** OpenAI Responses API call inside the worker —
       severity/category classification, root-cause summary, suggested steps
-- [ ] **M4 — External context:** GitHub REST API lookup folded into analysis
+- [x] **M4 — External context:** GitHub REST API lookup folded into analysis
 - [ ] **M5 — Frontend:** submission form, job status/progress view, results
 - [ ] **M6 — Hardening:** retry logic, tests, Docker image, CI, deployment
 
@@ -34,7 +34,7 @@ describes what is actually implemented — not the full target scope.
 - **Containers:** Docker Compose
 - **Deployment:** Render (planned)
 
-## Local setup (current M3 scope)
+## Local setup (current M4 scope)
 
 Prerequisites: Node.js 20+, npm, Docker Desktop.
 
@@ -65,3 +65,8 @@ The background worker uses `gpt-5-mini` with a strict structured-output schema.
 It persists severity and category on the incident, plus root cause and a
 JSON-encoded array of suggested steps on the analysis job. Failed calls retry
 up to three total attempts with exponential backoff before becoming `FAILED`.
+Before analysis, the worker makes one bounded public GitHub issue search and
+stores up to three normalized results in `AnalysisJob.externalContext`.
+`GITHUB_TOKEN` is optional and used only by the backend; without it, the lookup
+uses GitHub's lower-limit unauthenticated public API. GitHub lookup failures are
+non-fatal and analysis continues using the incident report alone.

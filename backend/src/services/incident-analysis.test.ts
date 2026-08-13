@@ -27,19 +27,33 @@ describe("OpenAI incident analysis provider", () => {
       openAIIncidentAnalysisProvider.analyze({
         title: "API errors",
         description: "Requests fail when database traffic increases.",
+        externalContext: [
+          {
+            sourceType: "github_issue",
+            title: "Pool timeout",
+            url: "https://github.com/example/api/issues/1",
+            excerpt: "Connections remain checked out.",
+            repository: "example/api",
+          },
+        ],
       })
     ).resolves.toEqual(analysis);
 
     expect(mocks.parse).toHaveBeenCalledWith(
       expect.objectContaining({ model: "gpt-5-mini", text: { format: expect.anything() } })
     );
+    expect(mocks.parse.mock.calls[0][0].input[1].content).toContain("example/api");
   });
 
   it("rejects a response with no parsed structured output", async () => {
     mocks.parse.mockResolvedValue({ output_parsed: null });
 
     await expect(
-      openAIIncidentAnalysisProvider.analyze({ title: "API errors", description: "Failure" })
+      openAIIncidentAnalysisProvider.analyze({
+        title: "API errors",
+        description: "Failure",
+        externalContext: [],
+      })
     ).rejects.toThrow("no valid structured incident analysis");
   });
 
@@ -54,7 +68,11 @@ describe("OpenAI incident analysis provider", () => {
     });
 
     await expect(
-      openAIIncidentAnalysisProvider.analyze({ title: "API errors", description: "Failure" })
+      openAIIncidentAnalysisProvider.analyze({
+        title: "API errors",
+        description: "Failure",
+        externalContext: [],
+      })
     ).rejects.toThrow();
   });
 });
