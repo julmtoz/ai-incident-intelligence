@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model Incident {
+  id          String            @id @default(uuid())
+  title       String
+  description String
+  severity    IncidentSeverity?
+  category    String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  jobs AnalysisJob[]
+
+  @@index([createdAt])
+}
+
+model AnalysisJob {
+  id            String    @id @default(uuid())
+  incidentId    String
+  incident      Incident  @relation(fields: [incidentId], references: [id])
+  status        JobStatus @default(QUEUED)
+  attempts      Int       @default(0)
+  rootCause     String?
+  suggestedSteps String?
+  externalContext Json?
+  error         String?
+  createdAt     DateTime  @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+
+  @@index([incidentId])
+  @@index([status])
+}
