@@ -18,7 +18,8 @@ describes what is actually implemented — not the full target scope.
 - [x] **M3 — AI integration:** OpenAI Responses API call inside the worker —
       severity/category classification, root-cause summary, suggested steps
 - [x] **M4 — External context:** GitHub REST API lookup folded into analysis
-- [ ] **M5 — Frontend:** submission form, job status/progress view, results
+- [x] **M5 — Frontend:** responsive React dashboard with incident submission,
+      status polling, analysis results, and GitHub context
 - [ ] **M6 — Hardening:** retry logic, tests, Docker image, CI, deployment
 
 ## Stack
@@ -34,7 +35,7 @@ describes what is actually implemented — not the full target scope.
 - **Containers:** Docker Compose
 - **Deployment:** Render (planned)
 
-## Local setup (current M4 scope)
+## Local setup (current M5 scope)
 
 Prerequisites: Node.js 20+, npm, Docker Desktop.
 
@@ -48,6 +49,17 @@ npm run dev
 ```
 
 API listens at `http://localhost:3001`.
+
+In a second terminal, start the frontend:
+
+```bash
+npm run dev:frontend
+```
+
+The dashboard opens at `http://localhost:5173`. During development, Vite
+proxies `/api` and `/health` requests to the backend. To use a different API
+origin, copy `frontend/.env.example` to `frontend/.env` and set
+`VITE_API_BASE_URL`. The browser never calls OpenAI or GitHub directly.
 
 Health endpoints:
 
@@ -70,3 +82,15 @@ stores up to three normalized results in `AnalysisJob.externalContext`.
 `GITHUB_TOKEN` is optional and used only by the backend; without it, the lookup
 uses GitHub's lower-limit unauthenticated public API. GitHub lookup failures are
 non-fatal and analysis continues using the incident report alone.
+
+## Frontend workflow
+
+The M5 dashboard submits incidents through the existing API, adds them to the
+local incident list immediately, and polls the selected incident every 2.5
+seconds while its latest job is `QUEUED` or `PROCESSING`. Polling stops at
+`COMPLETED` or `FAILED`. Completed jobs show classification, probable root
+cause, parsed troubleshooting steps, and any normalized GitHub issue context.
+Failed jobs show safe retry guidance without exposing stored provider errors.
+
+Production hardening, CI, container images, and deployment remain explicitly
+pending for M6.
