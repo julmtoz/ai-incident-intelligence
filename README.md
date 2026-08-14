@@ -6,12 +6,12 @@ root cause, actionable troubleshooting steps, and relevant public GitHub issue
 context. Analysis runs asynchronously through a durable Redis-backed queue so
 the API stays responsive while the AI workflow completes.
 
-**Project status:** M1–M6 complete. The repository is deployment-ready; a public
-live demo URL has not been provisioned yet.
+**Project status:** M1–M6.1 complete and running in production on Railway.
 
-> Live demo: _add the Render `onrender.com` URL after the first deployment._
+> **Live demo:** [SignalDesk Incident Intelligence](https://ai-incident-intelligence-production-df73.up.railway.app)
 >
-> Screenshots: _add desktop and mobile dashboard captures after deployment._
+> The production deployment uses managed Railway PostgreSQL and Redis services,
+> an embedded BullMQ worker, OpenAI structured analysis, and GitHub issue context.
 
 ## Architecture
 
@@ -41,7 +41,7 @@ without changing the queue contract.
 - Bounded, non-fatal GitHub issue enrichment
 - PostgreSQL- and Redis-aware readiness checks
 - Multi-stage, non-root production Docker image
-- GitHub Actions CI and Render Blueprint infrastructure-as-code
+- GitHub Actions CI plus Railway and Render infrastructure-as-code
 - Security headers, body limits, rate limiting, safe errors, and graceful shutdown
 
 ## Analysis workflow
@@ -120,7 +120,7 @@ Required server-side variables:
 Optional/runtime variables:
 
 - `GITHUB_TOKEN` — raises GitHub search rate limits; remains server-side
-- `PORT` — defaults to `3001`; Render supplies `10000`
+- `PORT` — defaults to `3001`; deployment platforms supply the production value
 - `FRONTEND_URL` — optional CORS origin for split-origin development/deployments
 - `BODY_LIMIT`, `RATE_LIMIT_*`, `STATIC_DIR`, `TRUST_PROXY`
 
@@ -156,6 +156,32 @@ Provision Railway PostgreSQL and Redis services, then set `DATABASE_URL` and
 `REDIS_URL` as reference variables on the application service. Set
 `NODE_ENV=production`, `TRUST_PROXY=true`, and a sealed `OPENAI_API_KEY`;
 `GITHUB_TOKEN` remains optional. Railway supplies `PORT` automatically.
+
+### Verified production deployment
+
+The live environment consists of three Railway services:
+
+- `ai-incident-intelligence` — same-origin React application, Express API, and
+  embedded BullMQ worker
+- `ai-incident-db` — managed PostgreSQL persistence
+- `Redis` — managed BullMQ queue and retry state
+
+Production verification completed successfully on August 14, 2026:
+
+- Docker build, Prisma pre-deploy migrations, application startup, and
+  `/health/ready` completed successfully.
+- `/health/live` returned `live`.
+- `/health/ready` returned `ready` with PostgreSQL and Redis both `up`.
+- The public React application loaded from the same origin as the API.
+- A real incident progressed from `PROCESSING` to `COMPLETED` on its first
+  analysis attempt.
+- OpenAI produced structured severity, category, root-cause, and recovery-step
+  output.
+- GitHub enrichment returned three relevant public issue references.
+
+The production service uses a 50-second internal graceful-shutdown deadline
+inside Railway's 60-second drain window. Secrets remain server-side and are not
+returned in API responses or written to application logs.
 
 ## CI
 
