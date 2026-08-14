@@ -29,7 +29,12 @@ vi.mock("./db.js", () => ({
   },
 }));
 
-import { createAnalysisProcessor, recordAnalysisFailure, recoverIncompleteAnalysisJobs } from "./worker.js";
+import {
+  createAnalysisProcessor,
+  recordAnalysisFailure,
+  recoverIncompleteAnalysisJobs,
+  sanitizeAnalysisError,
+} from "./worker.js";
 
 function makeJob(attemptsMade = 0, attempts = 3) {
   return {
@@ -139,25 +144,71 @@ describe("analysis worker", () => {
   });
 
   it("returns a retrying failure to QUEUED with its error", async () => {
+    const logging = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await recordAnalysisFailure(makeJob(1, 3), new Error("OpenAI rate limit"));
 
     expect(mocks.analysisJobUpdate).toHaveBeenLastCalledWith({
       where: { id: "job-1" },
-      data: { status: "QUEUED", error: "OpenAI rate limit", completedAt: null },
+      data: { status: "QUEUED", error: "Error: OpenAI rate limit", completedAt: null },
     });
+    expect(logging).toHaveBeenCalledWith(
+      "Analysis attempt failed",
+      expect.objectContaining({ attempt: 1, maxAttempts: 3, terminal: false })
+    );
+    logging.mockRestore();
   });
 
   it("records FAILED after the final attempt", async () => {
+    const logging = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await recordAnalysisFailure(makeJob(3, 3), new Error("OpenAI unavailable"));
 
     expect(mocks.analysisJobUpdate).toHaveBeenLastCalledWith({
       where: { id: "job-1" },
       data: {
         status: "FAILED",
-        error: "OpenAI unavailable",
+        error: "Error: OpenAI unavailable",
         completedAt: expect.any(Date),
       },
     });
+    expect(logging).toHaveBeenCalledWith(
+      "Analysis attempt failed",
+      expect.objectContaining({ attempt: 3, maxAttempts: 3, terminal: true })
+    );
+    logging.mockRestore();
+  });
+
+  it("sanitizes provider metadata without retaining secrets or response bodies", async () => {
+    const providerError = Object.assign(
+      new Error("401 invalid api_key=sk-secret-token Bearer private-token"),
+      {
+        status: 401,
+        code: "invalid_api_key",
+        type: "authentication_error",
+        request_id: "req_123",
+        error: { requestBody: "sensitive incident description" },
+      }
+    );
+    const logging = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    expect(sanitizeAnalysisError(providerError)).toEqual({
+      category: "Error",
+      message: "401 invalid api_key=[REDACTED] Bearer [REDACTED]",
+      status: 401,
+      code: "invalid_api_key",
+      type: "authentication_error",
+      requestId: "req_123",
+    });
+
+    await recordAnalysisFailure(makeJob(1, 3), providerError);
+
+    const persisted = mocks.analysisJobUpdate.mock.calls.at(-1)?.[0].data.error as string;
+    const logged = JSON.stringify(logging.mock.calls.at(-1));
+    expect(persisted).toContain("status=401");
+    expect(persisted).toContain("code=invalid_api_key");
+    expect(persisted).not.toContain("sk-secret-token");
+    expect(logged).not.toContain("private-token");
+    expect(logged).not.toContain("sensitive incident description");
+    logging.mockRestore();
   });
 
   it("preserves the original startedAt on retries", async () => {

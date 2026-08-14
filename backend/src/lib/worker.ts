@@ -14,9 +14,55 @@ import { analysisQueue } from "./queue.js";
 
 type AnalysisJobData = { incidentId: string; jobId: string };
 
+type SanitizedAnalysisError = {
+  category: string;
+  message: string;
+  status?: number;
+  code?: string;
+  type?: string;
+  requestId?: string;
+};
+
+function sanitizedString(value: unknown, maxLength: number) {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  return value
+    .replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[REDACTED]")
+    .replace(/\bBearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(/\bapi[_-]?key\s*[:=]\s*\S+/gi, "api_key=[REDACTED]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+export function sanitizeAnalysisError(error: unknown): SanitizedAnalysisError {
+  const candidate = typeof error === "object" && error !== null
+    ? error as Record<string, unknown>
+    : undefined;
+  const category = sanitizedString(
+    error instanceof Error ? error.constructor.name : undefined,
+    80
+  ) ?? "UnknownAnalysisError";
+  const message = sanitizedString(error instanceof Error ? error.message : undefined, 500)
+    ?? "Unknown analysis error";
+  const status = typeof candidate?.status === "number" ? candidate.status : undefined;
+  const code = sanitizedString(candidate?.code, 120);
+  const type = sanitizedString(candidate?.type, 120);
+  const requestId = sanitizedString(candidate?.request_id, 120);
+
+  return { category, message, status, code, type, requestId };
+}
+
 function safeErrorMessage(error: unknown) {
-  const message = error instanceof Error ? error.message : "Unknown analysis error";
-  return message.slice(0, 2000);
+  const diagnostic = sanitizeAnalysisError(error);
+  const metadata = [
+    diagnostic.status === undefined ? undefined : `status=${diagnostic.status}`,
+    diagnostic.code ? `code=${diagnostic.code}` : undefined,
+    diagnostic.type ? `type=${diagnostic.type}` : undefined,
+  ].filter(Boolean);
+  const prefix = metadata.length > 0
+    ? `${diagnostic.category} (${metadata.join(", ")})`
+    : diagnostic.category;
+  return `${prefix}: ${diagnostic.message}`.slice(0, 2000);
 }
 
 export function createAnalysisProcessor(
@@ -78,6 +124,15 @@ export async function recordAnalysisFailure(
 
   const maxAttempts = job.opts.attempts ?? 1;
   const isTerminal = job.attemptsMade >= maxAttempts;
+  const diagnostic = sanitizeAnalysisError(error);
+  console.error("Analysis attempt failed", {
+    jobId: job.data.jobId,
+    incidentId: job.data.incidentId,
+    attempt: job.attemptsMade,
+    maxAttempts,
+    terminal: isTerminal,
+    ...diagnostic,
+  });
   await db.analysisJob.update({
     where: { id: job.data.jobId },
     data: isTerminal
