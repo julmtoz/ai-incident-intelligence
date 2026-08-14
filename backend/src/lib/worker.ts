@@ -125,14 +125,17 @@ export async function recordAnalysisFailure(
   const maxAttempts = job.opts.attempts ?? 1;
   const isTerminal = job.attemptsMade >= maxAttempts;
   const diagnostic = sanitizeAnalysisError(error);
-  console.error("Analysis attempt failed", {
-    jobId: job.data.jobId,
-    incidentId: job.data.incidentId,
-    attempt: job.attemptsMade,
-    maxAttempts,
-    terminal: isTerminal,
-    ...diagnostic,
-  });
+  console.error(
+    "Analysis attempt failed",
+    JSON.stringify({
+      jobId: job.data.jobId,
+      incidentId: job.data.incidentId,
+      attempt: job.attemptsMade,
+      maxAttempts,
+      terminal: isTerminal,
+      ...diagnostic,
+    })
+  );
   await db.analysisJob.update({
     where: { id: job.data.jobId },
     data: isTerminal

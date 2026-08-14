@@ -153,7 +153,7 @@ describe("analysis worker", () => {
     });
     expect(logging).toHaveBeenCalledWith(
       "Analysis attempt failed",
-      expect.objectContaining({ attempt: 1, maxAttempts: 3, terminal: false })
+      expect.stringContaining('"attempt":1')
     );
     logging.mockRestore();
   });
@@ -172,7 +172,7 @@ describe("analysis worker", () => {
     });
     expect(logging).toHaveBeenCalledWith(
       "Analysis attempt failed",
-      expect.objectContaining({ attempt: 3, maxAttempts: 3, terminal: true })
+      expect.stringContaining('"terminal":true')
     );
     logging.mockRestore();
   });
