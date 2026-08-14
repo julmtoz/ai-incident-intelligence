@@ -144,6 +144,19 @@ Render’s Blueprint and health-check behavior are documented in the
 [Blueprint specification](https://render.com/docs/blueprint-spec) and
 [health-check guide](https://render.com/docs/health-checks).
 
+## Deploy to Railway
+
+[`railway.json`](./railway.json) selects the production Dockerfile, configures
+`/health/ready`, and gives shutdowns a 60-second drain. The application keeps a
+50-second internal force-exit deadline so `worker.close()` can finish an active
+GitHub lookup and OpenAI request before Railway sends `SIGKILL`, while retaining
+a 10-second platform buffer.
+
+Provision Railway PostgreSQL and Redis services, then set `DATABASE_URL` and
+`REDIS_URL` as reference variables on the application service. Set
+`NODE_ENV=production`, `TRUST_PROXY=true`, and a sealed `OPENAI_API_KEY`;
+`GITHUB_TOKEN` remains optional. Railway supplies `PORT` automatically.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on pushes and pull requests and performs npm

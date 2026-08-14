@@ -3,6 +3,7 @@ import { app } from "./app.js";
 import { env } from "./config.js";
 import { analysisQueue } from "./lib/queue.js";
 import { db } from "./lib/db.js";
+import { scheduleForceExit } from "./lib/shutdown.js";
 import { recoverIncompleteAnalysisJobs, startWorker } from "./lib/worker.js";
 
 const worker = startWorker();
@@ -19,8 +20,7 @@ async function shutdown(signal: string) {
   shuttingDown = true;
   console.log(`${signal} received; shutting down gracefully`);
   server.close();
-  const forceExit = setTimeout(() => process.exit(1), 25_000);
-  forceExit.unref();
+  const forceExit = scheduleForceExit();
   try {
     await worker.close();
     await analysisQueue.close();
