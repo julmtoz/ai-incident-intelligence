@@ -8,6 +8,12 @@ the API stays responsive while the AI workflow completes.
 
 **Project status:** M1–M6.1 complete and running in production on Railway.
 
+## Recruiter summary
+
+A production-oriented full-stack incident-analysis system demonstrating backend architecture, durable asynchronous processing, structured AI integration, relational persistence, external API enrichment, testing, CI, Docker, and deployment.
+
+**Best evidence:** responsive REST API, PostgreSQL/Prisma data model, Redis/BullMQ retries and recovery, schema-validated OpenAI output, bounded GitHub enrichment, health checks, security controls, and production deployment.
+
 > **Live demo:** [SignalDesk Incident Intelligence](https://ai-incident-intelligence-production-df73.up.railway.app)
 >
 > The production deployment uses managed Railway PostgreSQL and Redis services,
