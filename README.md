@@ -1,5 +1,8 @@
 # AI Incident Intelligence Platform
 
+[![CI](https://github.com/julmtoz/ai-incident-intelligence/actions/workflows/ci.yml/badge.svg)](https://github.com/julmtoz/ai-incident-intelligence/actions/workflows/ci.yml)
+
+
 A production-packaged incident operations dashboard that turns a plain-language
 IT incident into structured severity and category classification, a probable
 root cause, actionable troubleshooting steps, and relevant public GitHub issue
@@ -61,6 +64,19 @@ without changing the queue contract.
    ordered troubleshooting steps.
 5. Prisma atomically records the completed analysis. The frontend polls every
    2.5 seconds only while the job is `QUEUED` or `PROCESSING`.
+
+## Try the live demo
+
+[Open SignalDesk Incident Intelligence](https://ai-incident-intelligence-production-df73.up.railway.app)
+
+Suggested workflow:
+
+1. Submit a plain-language IT incident.
+2. Watch the status move through `QUEUED` and `PROCESSING`.
+3. Review the structured severity, category, probable root cause, and troubleshooting steps.
+4. Inspect the related public GitHub issue context when enrichment is available.
+
+Use fictional incident details only. The demo is intended for evaluation and may be reset or rate-limited.
 
 ## Local development
 
@@ -189,6 +205,14 @@ The production service uses a 50-second internal graceful-shutdown deadline
 inside Railway's 60-second drain window. Secrets remain server-side and are not
 returned in API responses or written to application logs.
 
+## Known limitations
+
+- The deployment uses one application service with an embedded BullMQ worker; a dedicated worker service would be the next scaling step.
+- AI output is advisory and should be reviewed by an operator before it informs a real incident response.
+- GitHub enrichment is intentionally bounded and non-fatal; analysis continues when the external lookup is unavailable.
+- The live demo depends on managed Railway PostgreSQL, Redis, and OpenAI services and may be rate-limited.
+- The project is a portfolio deployment, not a substitute for a full enterprise incident-management platform with SSO, paging, and compliance controls.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on pushes and pull requests and performs npm
@@ -205,3 +229,7 @@ backend/frontend builds, Compose validation, and a production Docker build.
 - [x] M6 — Production hardening, CI, Docker, deployment, portfolio packaging
 
 No additional milestone or product feature work is included in M6.
+
+## License
+
+Released under the MIT License. See [LICENSE](./LICENSE).
